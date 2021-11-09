@@ -31,11 +31,6 @@ type Arr struct {
 	Str_Arr []int
 }
 
-var (
-	draw_one_arr []int = make([]int, 0, 1)
-	draw_ten_arr []int = make([]int, 0, 10)
-)
-
 func main() {
 	// c := make(chan int, 2)
 	// c <- 1
@@ -44,5 +39,4 @@ func main() {
 	// for i := range c {
 	// 	fmt.Println(i)
 	// }
-
 }

@@ -1,8 +1,10 @@
 package znet
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"project_stu/src/zinx/utils"
 	"project_stu/src/zinx/ziface"
 	"time"
 )
@@ -17,13 +19,28 @@ type Server struct {
 	IP string
 	//服务绑定的端口
 	Port int
+
+	Router ziface.IRouter
+}
+
+// 链接回调
+// 这样是写死的 TODO 我们需要给用户提供自定义行为
+// 当前被路由代替
+func Callback_Connection(conn *net.TCPConn, data []byte, count int) error {
+	fmt.Println("[Conn Handle] execute...")
+	if _, err := conn.Write(data[:count]); err != nil {
+		fmt.Println("[Conn Handle] write err： ", err)
+		return errors.New("CallBackToClient error")
+	}
+	return nil
 }
 
 func (s *Server) Start() {
 	fmt.Printf("开始解析服务IP: %s, Port %d\n", s.IP, s.Port)
 
+	// 这个用于监听
 	go func() {
-		addr, err := net.ResolveTCPAddr(s.IPVersion, fmt.Sprint("%s:%d", s.IP, s.Port))
+		addr, err := net.ResolveTCPAddr(s.IPVersion, fmt.Sprintf("%s:%d", s.IP, s.Port))
 		if err != nil {
 			fmt.Println("解析TCP地址失败: ", err)
 			return
@@ -37,6 +54,9 @@ func (s *Server) Start() {
 
 		fmt.Println("开启服务  ", s.Name, " 成功, 监听中...")
 
+		var id_conn uint32
+		id_conn = 0
+
 		for {
 			conn, err := listenner.AcceptTCP()
 			if err != nil {
@@ -44,21 +64,9 @@ func (s *Server) Start() {
 				continue
 			}
 
-			go func() {
-				for {
-					buf := make([]byte, 512)
-					count, err := conn.Read(buf)
-					if err != nil {
-						fmt.Println("接收失败 ", err)
-						continue
-					}
-
-					if _, err := conn.Write(buf[:count]); err != nil {
-						fmt.Println("写入失败 ", err)
-						continue
-					}
-				}
-			}()
+			new_conn := NetConnection(conn, id_conn, s.Router)
+			id_conn++
+			new_conn.Start()
 		}
 	}()
 }
@@ -75,12 +83,22 @@ func (s *Server) Serve() {
 	}
 }
 
-func NewServer(name string) ziface.IServer {
+// 服务器添加路由功能
+func (s *Server) AddRouter(router ziface.IRouter) {
+	fmt.Println("add router succ")
+	s.Router = router
+}
+
+func NewServer() ziface.IServer {
+
+	utils.GlobalObject.Reload()
+
 	s := &Server{
-		Name:      name,
+		Name:      utils.GlobalObject.Name,
 		IPVersion: "tcp4",
-		IP:        "0.0.0.0",
-		Port:      7777,
+		IP:        utils.GlobalObject.Host,
+		Port:      utils.GlobalObject.TcpPort,
+		Router:    nil,
 	}
 
 	return s
