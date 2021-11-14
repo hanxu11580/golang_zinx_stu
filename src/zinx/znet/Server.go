@@ -20,7 +20,7 @@ type Server struct {
 	//服务绑定的端口
 	Port int
 
-	Router ziface.IRouter
+	MsgHandler ziface.IMsghandler
 }
 
 // 链接回调
@@ -63,10 +63,12 @@ func (s *Server) Start() {
 				fmt.Println("Accept Failed", err)
 				continue
 			}
-
-			new_conn := NetConnection(conn, id_conn, s.Router)
+			fmt.Println("新连接接入", conn.RemoteAddr().String())
+			new_conn := NetConnection(conn, id_conn, s.MsgHandler)
 			id_conn++
-			new_conn.Start()
+
+			// 必须开始新的go程去处理
+			go new_conn.Start()
 		}
 	}()
 }
@@ -84,9 +86,9 @@ func (s *Server) Serve() {
 }
 
 // 服务器添加路由功能
-func (s *Server) AddRouter(router ziface.IRouter) {
+func (s *Server) AddRouter(msgId uint32, router ziface.IRouter) {
 	fmt.Println("add router succ")
-	s.Router = router
+	s.MsgHandler.AddRouter(msgId, router)
 }
 
 func NewServer() ziface.IServer {
@@ -94,11 +96,11 @@ func NewServer() ziface.IServer {
 	utils.GlobalObject.Reload()
 
 	s := &Server{
-		Name:      utils.GlobalObject.Name,
-		IPVersion: "tcp4",
-		IP:        utils.GlobalObject.Host,
-		Port:      utils.GlobalObject.TcpPort,
-		Router:    nil,
+		Name:       utils.GlobalObject.Name,
+		IPVersion:  "tcp4",
+		IP:         utils.GlobalObject.Host,
+		Port:       utils.GlobalObject.TcpPort,
+		MsgHandler: NewMsgHandle(),
 	}
 
 	return s

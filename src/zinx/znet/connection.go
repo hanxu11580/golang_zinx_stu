@@ -20,7 +20,9 @@ type Connection struct {
 	//告知该链接已经退出/停止的channel
 	ExitBuffChan chan bool
 	// 代替原来回调
-	Router ziface.IRouter
+	MsgHandler ziface.IMsghandler
+
+	InnerMsgChan chan []byte
 }
 
 // func NetConnection(conn *net.TCPConn, connID uint32, callback ziface.HandFunc) *Connection {
@@ -42,13 +44,14 @@ type Connection struct {
 	原来：回调函数直接操作连接和数据数组
 	现在：路由操作IRequest 并且支持自定义执行阶段前 中 后
 */
-func NetConnection(conn *net.TCPConn, connID uint32, router ziface.IRouter) *Connection {
+func NetConnection(conn *net.TCPConn, connID uint32, msghandler ziface.IMsghandler) *Connection {
 	c := &Connection{
 		Conn:         conn,
 		ConnID:       connID,
 		isClosed:     false,
-		Router:       router,
+		MsgHandler:   msghandler,
 		ExitBuffChan: make(chan bool, 1),
+		InnerMsgChan: make(chan []byte),
 	}
 
 	return c
@@ -119,18 +122,43 @@ func (c *Connection) StartReader() {
 			Conn: c,
 			Msg:  msg,
 		}
-		go func(request ziface.IRequest) {
-			//执行注册的路由方法
-			c.Router.PreHandle(request)
-			c.Router.Handle(request)
-			c.Router.PostHandle(request)
-		}(&req)
+
+		// go func(request ziface.IRequest) {
+		// 	//执行注册的路由方法
+		// 	c.Router.PreHandle(request)
+		// 	c.Router.Handle(request)
+		// 	c.Router.PostHandle(request)
+		// }(&req)
+
+		// 之前Connection只有一个固定路由 现在用MsgHandler控制多个路由
+		go c.MsgHandler.DoMsgHandler(&req)
+	}
+}
+
+// 开启帮助 每个远程连接写入 go程
+// 写入数据从InnerMsgChan流出
+func (c *Connection) StartWriter() {
+	fmt.Println("帮助远程连接", c.RemoteAddr().String(), "的写入进程启动...")
+	defer fmt.Println("帮助远程连接", c.RemoteAddr().String(), "的写入进程断开...")
+
+	for {
+		select {
+		case data := <-c.InnerMsgChan:
+			if _, err := c.Conn.Write(data); err != nil {
+				fmt.Println("Send Data error:, ", err, " Conn Writer exit")
+				return
+			}
+		case <-c.ExitBuffChan:
+			{
+				return
+			}
+		}
 	}
 }
 
 func (c *Connection) Start() {
 	go c.StartReader()
-
+	go c.StartWriter()
 	for {
 		select {
 		// 当信道流出 跳出循环
@@ -178,11 +206,15 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 		return errors.New("Pack error msg ")
 	}
 
-	if _, err := c.Conn.Write(msg_bytes); err != nil {
-		fmt.Println("Write msg id ", msgId, " error ")
-		c.ExitBuffChan <- true
-		return errors.New("conn Write error")
-	}
+	// 这个是原本写入方法，直接写入到连接Conn中
+	// 现在向InnerMsgChan通道中写入，再交给StartWriter处理
+	// if _, err := c.Conn.Write(msg_bytes); err != nil {
+	// 	fmt.Println("Write msg id ", msgId, " error ")
+	// 	c.ExitBuffChan <- true
+	// 	return errors.New("conn Write error")
+	// }
+
+	c.InnerMsgChan <- msg_bytes
 
 	return nil
 }
